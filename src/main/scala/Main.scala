@@ -26,37 +26,19 @@ object Main {
   // Mockito by default creates a proxy class for scala.xml.Node when we call a method
   // in a mocked method that returns a Node. That triggers the failure indirectly.
   private def mockingClassReferencingNodeFails(): Unit = {
-    try {
-      val mock = Mockito.mock(classOf[Test], withSettings().defaultAnswer(RETURNS_SMART_NULLS))
-      mock.m()
-      assert(false)
-    } catch {
-      case ex: MockitoException =>
-        assert(ex.getMessage.contains("overrides final method scala.collection.AbstractSeq.concat"))
-    }
+    val mock = Mockito.mock(classOf[Test], withSettings().defaultAnswer(RETURNS_SMART_NULLS))
+    mock.m()
   }
 
   // Directly mocking Node fails as ByteBuddy emits a method that clashes with the final method in
   // a base class.
   private def mockingNodeFails(): Unit = {
-    try {
-      Mockito.mock[Node](classOf[Node])
-      assert(false)
-    } catch {
-      case ex: MockitoException =>
-        assert(ex.getMessage.contains("overrides final method scala.collection.AbstractSeq.concat"))
-    }
+    Mockito.mock[Node](classOf[Node])
   }
 
   // Standalone reproduction:
   private def mockingNFails(): Unit = {
-    try {
-      Mockito.mock[N](classOf[N])
-      assert(false)
-    } catch {
-      case ex: MockitoException =>
-        assert(ex.getMessage.contains("overrides final method demo.mockitonode.AbstractT.foo"))
-    }
+    Mockito.mock[N](classOf[N])
   }
 
   private def mockingClassReferencingNodeOkayWhenNotStubbingNode(): Unit = {
@@ -90,3 +72,28 @@ trait BaseNS extends U[N] {
 class NS extends AbstractT[N] with BaseNS
 
 class N extends NS
+
+class NodeMockMaker extends MockMaker {
+  val delegate = new org.mockito.internal.creation.bytebuddy.ByteBuddyMockMaker
+
+  def createMock[T](settings: MockCreationSettings[T], handler: MockHandler[_]): T = {
+    val typeToMock = settings.getTypeToMock
+    if (classOf[scala.xml.Document].isAssignableFrom(typeToMock))
+      new scala.xml.Document().asInstanceOf[T]
+    else if (classOf[scala.xml.NodeSeq].isAssignableFrom(typeToMock))
+      scala.xml.Group(Nil).asInstanceOf[T]
+    else if (classOf[NS].isAssignableFrom(typeToMock))
+      new N().asInstanceOf[T]
+    else
+      delegate.createMock(settings, handler)
+  }
+
+  def getHandler(mock: Object): MockHandler[_] =
+    delegate.getHandler(mock)
+
+  def resetMock(mock: Object, newHandler: MockHandler[_], settings: MockCreationSettings[_]): Unit =
+    delegate.resetMock(mock, newHandler, settings)
+
+  def isTypeMockable(tpe: Class[_]): MockMaker.TypeMockability =
+    delegate.isTypeMockable(tpe)
+}
